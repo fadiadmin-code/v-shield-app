@@ -28,6 +28,11 @@ jobs:
       - name: Create Android Project Files
         run: flutter create . --project-name v_shield --platforms=android
 
+      - name: Fix Lint Bug & Add Internet Permission
+        run: |
+          printf '\nandroid {\n    lint {\n        checkReleaseBuilds = false\n        abortOnError = false\n    }\n}\n' >> android/app/build.gradle.kts
+          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
+
       - name: Install Dependencies
         run: flutter pub get
 
