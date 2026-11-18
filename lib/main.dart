@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -15,7 +17,7 @@ class VShieldApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'V-SHIELD V2.0',
+      title: 'V-SHIELD V3.0',
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF0B111E),
       ),
@@ -27,6 +29,60 @@ class VShieldApp extends StatelessWidget {
   }
 }
 
+// بروفايلات أجهزة سليمة لمحاكاة الأجهزة الحقيقية
+class DeviceProfile {
+  final String name;
+  final String userAgent;
+  final String gpuVendor;
+  final String gpuRenderer;
+  final int cores;
+  final int memory;
+
+  const DeviceProfile({
+    required this.name,
+    required this.userAgent,
+    required this.gpuVendor,
+    required this.gpuRenderer,
+    required this.cores,
+    required this.memory,
+  });
+}
+
+const List<DeviceProfile> kDeviceProfiles = [
+  DeviceProfile(
+    name: 'Samsung Galaxy S24 Ultra',
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.122 Mobile Safari/537.36',
+    gpuVendor: 'Qualcomm',
+    gpuRenderer: 'Adreno (TM) 750',
+    cores: 8,
+    memory: 12,
+  ),
+  DeviceProfile(
+    name: 'Google Pixel 8 Pro',
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.6422.165 Mobile Safari/537.36',
+    gpuVendor: 'ARM',
+    gpuRenderer: 'Mali-G715',
+    cores: 8,
+    memory: 12,
+  ),
+  DeviceProfile(
+    name: 'OnePlus 12 5G',
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; CPH2581) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.71 Mobile Safari/537.36',
+    gpuVendor: 'Qualcomm',
+    gpuRenderer: 'Adreno (TM) 750',
+    cores: 8,
+    memory: 16,
+  ),
+  DeviceProfile(
+    name: 'Xiaomi 14 Pro',
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; 23116PN5BC) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.6367.179 Mobile Safari/537.36',
+    gpuVendor: 'Qualcomm',
+    gpuRenderer: 'Adreno (TM) 750',
+    cores: 8,
+    memory: 12,
+  ),
+];
+
 class MainNavigation extends StatefulWidget {
   const MainNavigation({super.key});
 
@@ -37,7 +93,7 @@ class MainNavigation extends StatefulWidget {
 class _MainNavigationState extends State<MainNavigation> {
   int _currentIndex = 0;
 
-  // بيانات الهوية الحالية (تتحدث تلقائياً من الفاحص)
+  // بيانات الهوية المباشرة
   String currentIp = 'جاري الفحص...';
   String country = '---';
   String city = '---';
@@ -46,6 +102,18 @@ class _MainNavigationState extends State<MainNavigation> {
   double lat = 40.7128;
   double lon = -74.0060;
   bool isChecking = false;
+
+  // بيانات البروكسي
+  String proxyType = 'SOCKS5';
+  String proxyHost = '';
+  String proxyPort = '';
+  String proxyUser = '';
+  String proxyPass = '';
+  String proxyPing = 'غير مفحوص';
+
+  // البروفايل النشط وبذرة التشويش
+  DeviceProfile activeProfile = kDeviceProfiles[0];
+  int noiseSeed = Random().nextInt(99999);
 
   @override
   void initState() {
@@ -76,6 +144,31 @@ class _MainNavigationState extends State<MainNavigation> {
     }
   }
 
+  void _rotateDeviceIdentity() {
+    final rnd = Random();
+    setState(() {
+      activeProfile = kDeviceProfiles[rnd.nextInt(kDeviceProfiles.length)];
+      noiseSeed = rnd.nextInt(999999);
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('تم توليد هوية جديدة: ${activeProfile.name} (Seed #$noiseSeed)'),
+        backgroundColor: const Color(0xFF00E676),
+      ),
+    );
+  }
+
+  void _updateProxy(String type, String host, String port, String user, String pass, String ping) {
+    setState(() {
+      proxyType = type;
+      proxyHost = host;
+      proxyPort = port;
+      proxyUser = user;
+      proxyPass = pass;
+      proxyPing = ping;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [
@@ -86,9 +179,23 @@ class _MainNavigationState extends State<MainNavigation> {
         timezone: timezone,
         isp: isp,
         isChecking: isChecking,
+        proxyType: proxyType,
+        proxyHost: proxyHost,
+        proxyPort: proxyPort,
+        proxyUser: proxyUser,
+        proxyPass: proxyPass,
+        proxyPing: proxyPing,
+        activeProfile: activeProfile,
         onRefresh: _checkIdentity,
+        onUpdateProxy: _updateProxy,
+        onRotateIdentity: _rotateDeviceIdentity,
       ),
-      StealthBrowserTab(targetTimezone: timezone),
+      StealthBrowserTab(
+        targetTimezone: timezone,
+        profile: activeProfile,
+        noiseSeed: noiseSeed,
+        onRotateIdentity: _rotateDeviceIdentity,
+      ),
       SystemSpoofTab(timezone: timezone, lat: lat, lon: lon, country: country),
     ];
 
@@ -101,7 +208,7 @@ class _MainNavigationState extends State<MainNavigation> {
         unselectedItemColor: Colors.white54,
         onTap: (i) => setState(() => _currentIndex = i),
         items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.shield), label: 'الدرع'),
+          BottomNavigationBarItem(icon: Icon(Icons.shield), label: 'الدرع والبروكسي'),
           BottomNavigationBarItem(icon: Icon(Icons.public), label: 'المتصفح الخفي'),
           BottomNavigationBarItem(icon: Icon(Icons.terminal), label: 'النظام و ADB'),
         ],
@@ -110,11 +217,14 @@ class _MainNavigationState extends State<MainNavigation> {
   }
 }
 
-// ==================== التبويب الأول: لوحة الدرع ====================
+// ==================== التبويب الأول: الدرع والبروكسي ====================
 class ShieldDashboard extends StatefulWidget {
   final String ip, country, city, timezone, isp;
+  final String proxyType, proxyHost, proxyPort, proxyUser, proxyPass, proxyPing;
+  final DeviceProfile activeProfile;
   final bool isChecking;
-  final VoidCallback onRefresh;
+  final VoidCallback onRefresh, onRotateIdentity;
+  final Function(String, String, String, String, String, String) onUpdateProxy;
 
   const ShieldDashboard({
     super.key,
@@ -124,7 +234,16 @@ class ShieldDashboard extends StatefulWidget {
     required this.timezone,
     required this.isp,
     required this.isChecking,
+    required this.proxyType,
+    required this.proxyHost,
+    required this.proxyPort,
+    required this.proxyUser,
+    required this.proxyPass,
+    required this.proxyPing,
+    required this.activeProfile,
     required this.onRefresh,
+    required this.onUpdateProxy,
+    required this.onRotateIdentity,
   });
 
   @override
@@ -136,13 +255,173 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
   String selectedEngine = 'VOID VPN';
   bool fullConeNat = true;
   bool blockWebRtc = true;
+  bool canvasNoise = true;
   bool syncTimezone = true;
   bool gpsSpoof = true;
-  bool simSpoof = true;
+
+  void _openProxyDialog() {
+    String tempType = widget.proxyType;
+    final quickCtrl = TextEditingController();
+    final hostCtrl = TextEditingController(text: widget.proxyHost);
+    final portCtrl = TextEditingController(text: widget.proxyPort);
+    final userCtrl = TextEditingController(text: widget.proxyUser);
+    final passCtrl = TextEditingController(text: widget.proxyPass);
+    String testStatus = widget.proxyPing;
+    bool testing = false;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            backgroundColor: const Color(0xFF121A2B),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: const BorderSide(color: Color(0xFF00A8FF)),
+            ),
+            title: const Text('إعداد وفحص البروكسي', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // لصق سريع
+                  TextField(
+                    controller: quickCtrl,
+                    textDirection: TextDirection.ltr,
+                    style: const TextStyle(fontSize: 12),
+                    decoration: InputDecoration(
+                      hintText: 'لصق سريع: ip:port:user:pass',
+                      hintStyle: const TextStyle(color: Colors.white38, fontSize: 11),
+                      filled: true,
+                      fillColor: const Color(0xFF0B111E),
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.auto_fix_high, color: Color(0xFF00E676), size: 18),
+                        onPressed: () {
+                          final parts = quickCtrl.text.trim().split(':');
+                          if (parts.length >= 2) {
+                            hostCtrl.text = parts[0];
+                            portCtrl.text = parts[1];
+                            if (parts.length >= 4) {
+                              userCtrl.text = parts[2];
+                              passCtrl.text = parts[3];
+                            }
+                          }
+                        },
+                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  // نوع البروكسي
+                  Row(
+                    children: ['SOCKS5', 'HTTP'].map((t) {
+                      final sel = tempType == t;
+                      return Expanded(
+                        child: GestureDetector(
+                          onTap: () => setDlgState(() => tempType = t),
+                          child: Container(
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: sel ? const Color(0x2200E676) : const Color(0xFF0B111E),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: sel ? const Color(0xFF00E676) : Colors.white12),
+                            ),
+                            child: Text(t, style: TextStyle(color: sel ? const Color(0xFF00E676) : Colors.white70, fontWeight: FontWeight.bold, fontSize: 12)),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 10),
+                  _input(hostCtrl, 'Host / IP'),
+                  const SizedBox(height: 8),
+                  _input(portCtrl, 'Port', isNum: true),
+                  const SizedBox(height: 8),
+                  _input(userCtrl, 'Username (اختياري)'),
+                  const SizedBox(height: 8),
+                  _input(passCtrl, 'Password (اختياري)', isPass: true),
+                  const SizedBox(height: 12),
+                  // زر فحص البروكسي الحقيقي (Ping)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('الحالة: $testStatus', style: const TextStyle(fontSize: 12, color: Color(0xFF00A8FF))),
+                      TextButton.icon(
+                        onPressed: testing
+                            ? null
+                            : () async {
+                                final h = hostCtrl.text.trim();
+                                final p = int.tryParse(portCtrl.text.trim()) ?? 0;
+                                if (h.isEmpty || p == 0) {
+                                  setDlgState(() => testStatus = 'أدخل IP و Port');
+                                  return;
+                                }
+                                setDlgState(() {
+                                  testing = true;
+                                  testStatus = 'جاري الفحص...';
+                                });
+                                final sw = Stopwatch()..start();
+                                try {
+                                  final sock = await Socket.connect(h, p, timeout: const Duration(seconds: 4));
+                                  sw.stop();
+                                  sock.destroy();
+                                  setDlgState(() => testStatus = 'شغال ✅ (${sw.elapsedMilliseconds}ms)');
+                                } catch (_) {
+                                  setDlgState(() => testStatus = 'فشل الاتصال ❌');
+                                } finally {
+                                  setDlgState(() => testing = false);
+                                }
+                              },
+                        icon: const Icon(Icons.speed, size: 16, color: Color(0xFF00E676)),
+                        label: const Text('فحص البينغ', style: TextStyle(color: Color(0xFF00E676), fontSize: 12)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00E676)),
+                onPressed: () {
+                  widget.onUpdateProxy(tempType, hostCtrl.text.trim(), portCtrl.text.trim(), userCtrl.text.trim(), passCtrl.text.trim(), testStatus);
+                  Navigator.pop(ctx);
+                },
+                child: const Text('حفظ البروكسي', style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _input(TextEditingController c, String hint, {bool isNum = false, bool isPass = false}) {
+    return TextField(
+      controller: c,
+      obscureText: isPass,
+      textDirection: TextDirection.ltr,
+      keyboardType: isNum ? TextInputType.number : TextInputType.text,
+      style: const TextStyle(fontSize: 13),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: Colors.white38, fontSize: 12),
+        filled: true,
+        fillColor: const Color(0xFF0B111E),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final Color activeColor = isConnected ? const Color(0xFF00E676) : const Color(0xFF00A8FF);
+    final bool hasProxy = widget.proxyHost.isNotEmpty && widget.proxyPort.isNotEmpty;
 
     return SafeArea(
       child: SingleChildScrollView(
@@ -157,20 +436,34 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
                     Text('V-SHIELD', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white)),
-                    Text('THE VOID PROTOCOL • V2.0', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF00A8FF))),
+                    Text('THE VOID PROTOCOL • V3.0 CLOAK', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF00A8FF))),
                   ],
                 ),
-                IconButton(
-                  onPressed: widget.onRefresh,
-                  icon: widget.isChecking
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E676)))
-                      : const Icon(Icons.refresh, color: Color(0xFF00E676)),
+                Row(
+                  children: [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0x2200A8FF),
+                        side: const BorderSide(color: Color(0xFF00A8FF)),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      ),
+                      onPressed: _openProxyDialog,
+                      icon: const Icon(Icons.vpn_key, size: 15, color: Color(0xFF00A8FF)),
+                      label: Text(hasProxy ? 'تعديل البروكسي' : 'إضافة بروكسي', style: const TextStyle(color: Color(0xFF00A8FF), fontSize: 12)),
+                    ),
+                    IconButton(
+                      onPressed: widget.onRefresh,
+                      icon: widget.isChecking
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E676)))
+                          : const Icon(Icons.refresh, color: Color(0xFF00E676)),
+                    ),
+                  ],
                 ),
               ],
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 14),
 
-            // بطاقة فحص الهوية المباشر
+            // بطاقة البروكسي والهوية
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
@@ -181,25 +474,40 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
               child: Column(
                 children: [
                   _infoRow('عنوان الـ IP الحالي:', widget.ip, const Color(0xFF00E676)),
-                  _infoRow('الموقع الجغرافي:', '${widget.country} - ${widget.city}', Colors.white),
-                  _infoRow('المنطقة الزمنية:', widget.timezone, const Color(0xFF00A8FF)),
-                  _infoRow('مزود الخدمة (ISP):', widget.isp, Colors.white70),
+                  _infoRow('الموقع والمنطقة:', '${widget.country} (${widget.timezone})', const Color(0xFF00A8FF)),
+                  _infoRow('البروكسي المضاف:', hasProxy ? '${widget.proxyType} | ${widget.proxyHost}:${widget.proxyPort}' : 'لم يتم الإضافة بعد', hasProxy ? Colors.amber : Colors.white38),
+                  _infoRow('حالة البينغ:', widget.proxyPing, Colors.white70),
+                  const Divider(color: Colors.white12, height: 16),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(child: Text('الجهاز المحاكى: ${widget.activeProfile.name}', style: const TextStyle(fontSize: 11, color: Colors.white70))),
+                      GestureDetector(
+                        onTap: widget.onRotateIdentity,
+                        child: const Text('تغيير الهوية ↻', style: TextStyle(fontSize: 12, color: Color(0xFF00E676), fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 22),
 
             // زر الاتصال
             Center(
               child: GestureDetector(
                 onTap: () {
-                  setState(() => isConnected = !isConnected);
-                  widget.onRefresh();
+                  if (!isConnected && !hasProxy) {
+                    _openProxyDialog();
+                  } else {
+                    setState(() => isConnected = !isConnected);
+                    widget.onRefresh();
+                  }
                 },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
-                  width: 155,
-                  height: 155,
+                  width: 150,
+                  height: 150,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: const Color(0xFF070C16),
@@ -217,9 +525,8 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                 ),
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 22),
 
-            // محرك التوجيه
             const Text('محرك التوجيه الخفي:', style: TextStyle(color: Colors.white70, fontSize: 13)),
             const SizedBox(height: 10),
             Row(
@@ -233,8 +540,7 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
             ),
             const SizedBox(height: 20),
 
-            // دروع تدمير البصمة
-            const Text('دروع تدمير البصمة وتخطي الفحص:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const Text('دروع تدمير البصمة وتخطي Verisoul:', style: TextStyle(color: Colors.white70, fontSize: 13)),
             const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -243,9 +549,9 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                 children: [
                   _shieldRow('توجيه UDP بالكامل (Full Cone NAT)', fullConeNat, (v) => setState(() => fullConeNat = v)),
                   _shieldRow('حجب تسريب WebRTC و ICE', blockWebRtc, (v) => setState(() => blockWebRtc = v)),
+                  _shieldRow('تشويش بصمة Canvas و WebGL و Audio', canvasNoise, (v) => setState(() => canvasNoise = v)),
                   _shieldRow('مزامنة المنطقة الزمنية واللغة', syncTimezone, (v) => setState(() => syncTimezone = v)),
                   _shieldRow('تمويه الموقع الجغرافي (GPS Spoof)', gpsSpoof, (v) => setState(() => gpsSpoof = v)),
-                  _shieldRow('محاكاة الشريحة والشبكة (SIM Spoof)', simSpoof, (v) => setState(() => simSpoof = v)),
                 ],
               ),
             ),
@@ -257,7 +563,7 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
 
   Widget _infoRow(String label, String value, Color valColor) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -304,10 +610,20 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
   }
 }
 
-// ==================== التبويب الثاني: المتصفح الخفي ====================
+// ==================== التبويب الثاني: المتصفح الخفي المطور ====================
 class StealthBrowserTab extends StatefulWidget {
   final String targetTimezone;
-  const StealthBrowserTab({super.key, required this.targetTimezone});
+  final DeviceProfile profile;
+  final int noiseSeed;
+  final VoidCallback onRotateIdentity;
+
+  const StealthBrowserTab({
+    super.key,
+    required this.targetTimezone,
+    required this.profile,
+    required this.noiseSeed,
+    required this.onRotateIdentity,
+  });
 
   @override
   State<StealthBrowserTab> createState() => _StealthBrowserTabState();
@@ -315,38 +631,67 @@ class StealthBrowserTab extends StatefulWidget {
 
 class _StealthBrowserTabState extends State<StealthBrowserTab> {
   late final WebViewController _controller;
-  final TextEditingController _urlController = TextEditingController(text: 'https://whoer.net');
+  final TextEditingController _urlController = TextEditingController(text: 'https://browserleaks.com/webrtc');
 
   @override
   void initState() {
     super.initState();
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setUserAgent('Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36')
+      ..setUserAgent(widget.profile.userAgent)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageFinished: (_) => _injectAntiDetect(),
+          onPageFinished: (_) => _injectVoidCloak(),
         ),
       )
       ..loadRequest(Uri.parse(_urlController.text));
   }
 
-  void _injectAntiDetect() {
+  void _injectVoidCloak() {
+    final p = widget.profile;
+    final seed = (widget.noiseSeed % 5) + 1;
     final js = '''
-      // حجب تسريب WebRTC بالكامل
-      window.RTCPeerConnection = undefined;
-      window.webkitRTCPeerConnection = undefined;
-      window.mozRTCPeerConnection = undefined;
-      // تمويه المنطقة الزمنية واللغة
-      Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-      Object.defineProperty(navigator, 'language', {get: () => 'en-US'});
-      Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-      const origResolved = Intl.DateTimeFormat.prototype.resolvedOptions;
-      Intl.DateTimeFormat.prototype.resolvedOptions = function() {
-        const res = origResolved.apply(this, arguments);
-        res.timeZone = '${widget.targetTimezone}';
-        return res;
-      };
+      (function() {
+        // 1. حجب WebRTC بالكامل
+        window.RTCPeerConnection = undefined;
+        window.webkitRTCPeerConnection = undefined;
+        window.mozRTCPeerConnection = undefined;
+
+        // 2. إخفاء الأتمتة وتوحيد الهوية
+        Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+        Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => ${p.cores}});
+        Object.defineProperty(navigator, 'deviceMemory', {get: () => ${p.memory}});
+        Object.defineProperty(navigator, 'language', {get: () => 'en-US'});
+        Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+        if (navigator.getBattery) navigator.getBattery = undefined;
+
+        // 3. مزامنة المنطقة الزمنية
+        const origResolved = Intl.DateTimeFormat.prototype.resolvedOptions;
+        Intl.DateTimeFormat.prototype.resolvedOptions = function() {
+          const res = origResolved.apply(this, arguments);
+          res.timeZone = '${widget.targetTimezone}';
+          return res;
+        };
+
+        // 4. تشويش بصمة Canvas
+        const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+        HTMLCanvasElement.prototype.toDataURL = function() {
+          const ctx = this.getContext('2d');
+          if (ctx) {
+            ctx.fillStyle = 'rgba(0,0,0,0.01)';
+            ctx.fillRect(0, 0, $seed, $seed);
+          }
+          return origToDataURL.apply(this, arguments);
+        };
+
+        // 5. تمويه كرت الشاشة WebGL
+        const origGetParam = WebGLRenderingContext.prototype.getParameter;
+        WebGLRenderingContext.prototype.getParameter = function(param) {
+          if (param === 37445) return '${p.gpuVendor}';
+          if (param === 37446) return '${p.gpuRenderer}';
+          return origGetParam.apply(this, arguments);
+        };
+      })();
     ''';
     _controller.runJavaScript(js);
   }
@@ -354,6 +699,7 @@ class _StealthBrowserTabState extends State<StealthBrowserTab> {
   void _go() {
     String url = _urlController.text.trim();
     if (!url.startsWith('http')) url = 'https://$url';
+    _controller.setUserAgent(widget.profile.userAgent);
     _controller.loadRequest(Uri.parse(url));
   }
 
@@ -382,6 +728,14 @@ class _StealthBrowserTabState extends State<StealthBrowserTab> {
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
                     ),
                   ),
+                ),
+                IconButton(
+                  tooltip: 'توليد هوية جهاز جديدة',
+                  icon: const Icon(Icons.fingerprint, color: Color(0xFF00A8FF)),
+                  onPressed: () {
+                    widget.onRotateIdentity();
+                    _controller.reload();
+                  },
                 ),
                 IconButton(icon: const Icon(Icons.search, color: Color(0xFF00E676)), onPressed: _go),
               ],
