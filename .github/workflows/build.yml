@@ -26,7 +26,7 @@ jobs:
           cache: true
 
       - name: Create Android Project Files
-        run: flutter create . --platforms=android
+        run: flutter create . --project-name v_shield --platforms=android
 
       - name: Install Dependencies
         run: flutter pub get
