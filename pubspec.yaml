@@ -1,5 +1,5 @@
 name: v_shield
-description: V-SHIELD Security Protocol
+description: A secure anti-detect proxy app.
 publish_to: 'none'
 version: 1.0.0+1
 
@@ -12,7 +12,7 @@ dependencies:
 
 dev_dependencies:
   flutter_test:
-    sdk: flutter_test
+    sdk: flutter
 
 flutter:
   uses-material-design: true
