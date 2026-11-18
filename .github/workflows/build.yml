@@ -1,46 +1,12 @@
-name: Build V-SHIELD APK
-
-on:
-  push:
-    branches: [ main, master ]
-  workflow_dispatch:
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      - name: Set up Java JDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
-          cache: true
-
-      - name: Create Android Project Files
-        run: flutter create . --project-name v_shield --platforms=android
-
-      - name: Fix Lint Bug & Add Internet Permission
+- name: Inject Native VPN & Fix Lint
         run: |
           printf '\nandroid {\n    lint {\n        checkReleaseBuilds = false\n        abortOnError = false\n    }\n}\n' >> android/app/build.gradle.kts
-          sed -i 's/<application/<uses-permission android:name="android.permission.INTERNET"\/>\n    <application android:usesCleartextTraffic="true"/' android/app/src/main/AndroidManifest.xml
-
-      - name: Install Dependencies
-        run: flutter pub get
-
-      - name: Build APK Release
-        run: flutter build apk --release
-
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: V-Shield-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          cp native_android/*.kt android/app/src/main/kotlin/com/example/v_shield/
+          python3 -c '
+          p = "android/app/src/main/AndroidManifest.xml"
+          s = open(p).read()
+          s = s.replace("<application", "<uses-permission android:name=\"android.permission.INTERNET\"/>\n    <application android:usesCleartextTraffic=\"true\"", 1)
+          svc = "        <service android:name=\".VoidVpnService\" android:permission=\"android.permission.BIND_VPN_SERVICE\" android:exported=\"false\"><intent-filter><action android:name=\"android.net.VpnService\"/></intent-filter></service>\n    </application>"
+          s = s.replace("</application>", svc, 1)
+          open(p, "w").write(s)
+          '
