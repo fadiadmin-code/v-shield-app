@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 void main() {
@@ -17,7 +18,7 @@ class VShieldApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'V-SHIELD V4.0',
+      title: 'V-SHIELD V4.2',
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF0B111E),
       ),
@@ -114,13 +115,39 @@ class _MainNavigationState extends State<MainNavigation> {
   @override
   void initState() {
     super.initState();
+    _loadSavedProxy();
     _checkIdentity();
   }
 
-  Future<void> _checkIdentity() async {
+  Future<void> _loadSavedProxy() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      proxyType = prefs.getString('proxyType') ?? 'SOCKS5';
+      proxyHost = prefs.getString('proxyHost') ?? '';
+      proxyPort = prefs.getString('proxyPort') ?? '';
+      proxyUser = prefs.getString('proxyUser') ?? '';
+      proxyPass = prefs.getString('proxyPass') ?? '';
+      proxyPing = prefs.getString('proxyPing') ?? 'محفوظ ✅';
+    });
+  }
+
+  Future<void> _saveProxy(String type, String host, String port, String user, String pass, String ping) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('proxyType', type);
+    await prefs.setString('proxyHost', host);
+    await prefs.setString('proxyPort', port);
+    await prefs.setString('proxyUser', user);
+    await prefs.setString('proxyPass', pass);
+    await prefs.setString('proxyPing', ping);
+  }
+
+  Future<void> _checkIdentity({String? targetIp}) async {
     setState(() => isChecking = true);
     try {
-      final res = await http.get(Uri.parse('http://ip-api.com/json/')).timeout(const Duration(seconds: 8));
+      final url = (targetIp != null && targetIp.isNotEmpty)
+          ? 'http://ip-api.com/json/$targetIp'
+          : 'http://ip-api.com/json/';
+      final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
@@ -163,6 +190,10 @@ class _MainNavigationState extends State<MainNavigation> {
       proxyPass = pass;
       proxyPing = ping;
     });
+    _saveProxy(type, host, port, user, pass, ping);
+    if (host.isNotEmpty) {
+      _checkIdentity(targetIp: host);
+    }
   }
 
   @override
@@ -182,7 +213,8 @@ class _MainNavigationState extends State<MainNavigation> {
         proxyPass: proxyPass,
         proxyPing: proxyPing,
         activeProfile: activeProfile,
-        onRefresh: _checkIdentity,
+        onRefresh: () => _checkIdentity(),
+        onCheckProxyIp: () => _checkIdentity(targetIp: proxyHost),
         onUpdateProxy: _updateProxy,
         onRotateIdentity: _rotateDeviceIdentity,
       ),
@@ -219,7 +251,7 @@ class ShieldDashboard extends StatefulWidget {
   final String proxyType, proxyHost, proxyPort, proxyUser, proxyPass, proxyPing;
   final DeviceProfile activeProfile;
   final bool isChecking;
-  final VoidCallback onRefresh, onRotateIdentity;
+  final VoidCallback onRefresh, onCheckProxyIp, onRotateIdentity;
   final Function(String, String, String, String, String, String) onUpdateProxy;
 
   const ShieldDashboard({
@@ -238,6 +270,7 @@ class ShieldDashboard extends StatefulWidget {
     required this.proxyPing,
     required this.activeProfile,
     required this.onRefresh,
+    required this.onCheckProxyIp,
     required this.onUpdateProxy,
     required this.onRotateIdentity,
   });
@@ -430,7 +463,7 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
                     Text('V-SHIELD', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white)),
-                    Text('THE VOID PROTOCOL • V4.0 NATIVE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF00A8FF))),
+                    Text('THE VOID PROTOCOL • V4.2 CORE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF00A8FF))),
                   ],
                 ),
                 Row(
@@ -446,7 +479,7 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                       label: Text(hasProxy ? 'تعديل البروكسي' : 'إضافة بروكسي', style: const TextStyle(color: Color(0xFF00A8FF), fontSize: 12)),
                     ),
                     IconButton(
-                      onPressed: widget.onRefresh,
+                      onPressed: isConnected ? widget.onCheckProxyIp : widget.onRefresh,
                       icon: widget.isChecking
                           ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E676)))
                           : const Icon(Icons.refresh, color: Color(0xFF00E676)),
@@ -466,9 +499,9 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
               ),
               child: Column(
                 children: [
-                  _infoRow('عنوان الـ IP الحالي:', widget.ip, const Color(0xFF00E676)),
+                  _infoRow('عنوان الـ IP:', widget.ip, const Color(0xFF00E676)),
                   _infoRow('الموقع والمنطقة:', '${widget.country} (${widget.timezone})', const Color(0xFF00A8FF)),
-                  _infoRow('البروكسي المضاف:', hasProxy ? '${widget.proxyType} | ${widget.proxyHost}:${widget.proxyPort}' : 'لم يتم الإضافة بعد', hasProxy ? Colors.amber : Colors.white38),
+                  _infoRow('البروكسي المحفوظ:', hasProxy ? '${widget.proxyType} | ${widget.proxyHost}:${widget.proxyPort}' : 'لم يتم الإضافة بعد', hasProxy ? Colors.amber : Colors.white38),
                   _infoRow('حالة البينغ:', widget.proxyPing, Colors.white70),
                   const Divider(color: Colors.white12, height: 16),
                   Row(
@@ -496,22 +529,26 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                   try {
                     if (!isConnected) {
                       final bool started = await _vpnChannel.invokeMethod('startVpn', {
+                        'type': widget.proxyType.toLowerCase(),
                         'host': widget.proxyHost,
                         'port': int.tryParse(widget.proxyPort) ?? 1080,
+                        'user': widget.proxyUser,
+                        'pass': widget.proxyPass,
                       });
                       if (started) {
                         setState(() => isConnected = true);
+                        widget.onCheckProxyIp();
                       }
                     } else {
                       await _vpnChannel.invokeMethod('stopVpn');
                       setState(() => isConnected = false);
+                      widget.onRefresh();
                     }
                   } catch (e) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text('خطأ في النفق: $e'), backgroundColor: Colors.redAccent),
                     );
                   }
-                  widget.onRefresh();
                 },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 300),
