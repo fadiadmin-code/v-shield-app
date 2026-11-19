@@ -20,7 +20,7 @@ class VoidVpnService : VpnService() {
             return START_NOT_STICKY
         }
 
-        startForegroundNotification()
+        startForegroundSafe()
 
         val type = intent?.getStringExtra("type") ?: "socks5"
         val host = intent?.getStringExtra("host") ?: ""
@@ -32,66 +32,72 @@ class VoidVpnService : VpnService() {
         return START_STICKY
     }
 
-    private fun startForegroundNotification() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "V-SHIELD VPN Service",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager?.createNotificationChannel(channel)
-            val notification = Notification.Builder(this, CHANNEL_ID)
-                .setContentTitle("V-SHIELD Active")
-                .setContentText("Void Protocol Tunnel is running")
-                .setSmallIcon(android.R.drawable.ic_lock_lock)
-                .build()
-            startForeground(1, notification)
-        }
+    private fun startForegroundSafe() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID,
+                    "V-SHIELD VPN Service",
+                    NotificationManager.IMPORTANCE_LOW
+                )
+                val manager = getSystemService(NotificationManager::class.java)
+                manager?.createNotificationChannel(channel)
+                val notification = Notification.Builder(this, CHANNEL_ID)
+                    .setContentTitle("V-SHIELD Active")
+                    .setContentText("Void Protocol Tunnel is running")
+                    .setSmallIcon(android.R.drawable.ic_lock_lock)
+                    .build()
+                startForeground(1, notification)
+            }
+        } catch (_: Throwable) {}
     }
 
     private fun startVpn(type: String, host: String, port: Int, user: String, pass: String) {
         if (vpnInterface != null || host.isEmpty()) return
 
-        val builder = Builder()
-            .setSession("V-SHIELD Void Protocol")
-            .addAddress("10.0.0.2", 24)
-            .addRoute("0.0.0.0", 0)
-            .addDnsServer("8.8.8.8")
-            .addDnsServer("1.1.1.1")
-            .setMtu(1500)
-
         try {
-            builder.addDisallowedApplication(packageName)
-        } catch (_: Exception) {}
+            val builder = Builder()
+                .setSession("V-SHIELD Void Protocol")
+                .addAddress("10.0.0.2", 24)
+                .addRoute("0.0.0.0", 0)
+                .addDnsServer("8.8.8.8")
+                .addDnsServer("1.1.1.1")
+                .setMtu(1500)
 
-        vpnInterface = builder.establish()
-        val fd = vpnInterface?.fd ?: return
-
-        val scheme = type.lowercase()
-        val auth = if (user.isNotEmpty() && pass.isNotEmpty()) {
-            val u = URLEncoder.encode(user, "UTF-8")
-            val p = URLEncoder.encode(pass, "UTF-8")
-            "$u:$p@"
-        } else ""
-        val proxyUrl = "$scheme://$auth$host:$port"
-
-        Thread {
             try {
-                Tun2socks.start(fd.toLong(), proxyUrl, 1500L)
-            } catch (_: Exception) {}
-        }.start()
+                builder.addDisallowedApplication(packageName)
+            } catch (_: Throwable) {}
+
+            vpnInterface = builder.establish()
+            val fd = vpnInterface?.fd ?: return
+
+            val scheme = type.lowercase()
+            val auth = if (user.isNotEmpty() && pass.isNotEmpty()) {
+                val u = URLEncoder.encode(user, "UTF-8")
+                val p = URLEncoder.encode(pass, "UTF-8")
+                "$u:$p@"
+            } else ""
+            val proxyUrl = "$scheme://$auth$host:$port"
+
+            Thread {
+                try {
+                    Tun2socks.start(fd.toLong(), proxyUrl, 1500L)
+                } catch (_: Throwable) {}
+            }.start()
+        } catch (_: Throwable) {}
     }
 
     private fun stopVpn() {
         try {
             Tun2socks.stop()
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
         try {
             vpnInterface?.close()
-        } catch (_: Exception) {}
+        } catch (_: Throwable) {}
         vpnInterface = null
-        stopForeground(true)
+        try {
+            stopForeground(true)
+        } catch (_: Throwable) {}
         stopSelf()
     }
 
