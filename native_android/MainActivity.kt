@@ -10,8 +10,11 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "v_shield/vpn"
     private val VPN_REQUEST_CODE = 1001
+    private var pendingType = "socks5"
     private var pendingHost = ""
     private var pendingPort = 1080
+    private var pendingUser = ""
+    private var pendingPass = ""
     private var pendingResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -19,8 +22,12 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "startVpn" -> {
+                    pendingType = call.argument<String>("type") ?: "socks5"
                     pendingHost = call.argument<String>("host") ?: ""
                     pendingPort = call.argument<Int>("port") ?: 1080
+                    pendingUser = call.argument<String>("user") ?: ""
+                    pendingPass = call.argument<String>("pass") ?: ""
+
                     val intent = VpnService.prepare(this)
                     if (intent != null) {
                         pendingResult = result
@@ -42,8 +49,11 @@ class MainActivity : FlutterActivity() {
 
     private fun launchVpnService() {
         val intent = Intent(this, VoidVpnService::class.java).apply {
+            putExtra("type", pendingType)
             putExtra("host", pendingHost)
             putExtra("port", pendingPort)
+            putExtra("user", pendingUser)
+            putExtra("pass", pendingPass)
         }
         startService(intent)
     }
