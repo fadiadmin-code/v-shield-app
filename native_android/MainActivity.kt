@@ -3,6 +3,7 @@ package com.example.v_shield
 import android.app.Activity
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.location.Criteria
 import android.location.Location
 import android.location.LocationManager
@@ -13,10 +14,12 @@ import android.os.SystemClock
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import rikka.shizuku.Shizuku
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "v_shield/vpn"
     private val VPN_REQUEST_CODE = 1001
+    private val SHIZUKU_REQUEST_CODE = 1002
     private var pendingType = "socks5"
     private var pendingHost = ""
     private var pendingPort = 1080
@@ -58,8 +61,36 @@ class MainActivity : FlutterActivity() {
                     val lon = call.argument<Double>("lon") ?: 0.0
                     result.success(startMockLocationLoop(lat, lon))
                 }
+                "runShizukuCmd" -> {
+                    val cmd = call.argument<String>("cmd") ?: ""
+                    result.success(executeShizukuCommand(cmd))
+                }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    private fun executeShizukuCommand(cmd: String): String {
+        return try {
+            if (!Shizuku.pingBinder()) {
+                return "SHIZUKU_NOT_RUNNING"
+            }
+            if (Shizuku.checkSelfPermission() != PackageManager.PERMISSION_GRANTED) {
+                Shizuku.requestPermission(SHIZUKU_REQUEST_CODE)
+                return "PERMISSION_REQUESTED"
+            }
+            val method = Shizuku::class.java.getDeclaredMethod(
+                "newProcess",
+                Array<String>::class.java,
+                Array<String>::class.java,
+                String::class.java
+            )
+            method.isAccessible = true
+            val process = method.invoke(null, arrayOf("sh", "-c", cmd), null, null) as Process
+            process.waitFor()
+            if (process.exitValue() == 0) "OK" else "ERR_${process.exitValue()}"
+        } catch (e: Throwable) {
+            "ERROR: ${e.message}"
         }
     }
 
@@ -89,7 +120,6 @@ class MainActivity : FlutterActivity() {
         stopMockLocationLoop()
         return try {
             val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            // اختبار أولي للتأكد من وجود صلاحية الموقع الوهمي
             try {
                 lm.removeTestProvider(LocationManager.GPS_PROVIDER)
             } catch (_: Throwable) {}
