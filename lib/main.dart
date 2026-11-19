@@ -18,7 +18,7 @@ class VShieldApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'V-SHIELD V4.2',
+      title: 'V-SHIELD V4.4',
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF0B111E),
       ),
@@ -91,6 +91,7 @@ class MainNavigation extends StatefulWidget {
 }
 
 class _MainNavigationState extends State<MainNavigation> {
+  static const MethodChannel _vpnChannel = MethodChannel('v_shield/vpn');
   int _currentIndex = 0;
 
   String currentIp = 'جاري الفحص...';
@@ -108,6 +109,12 @@ class _MainNavigationState extends State<MainNavigation> {
   String proxyUser = '';
   String proxyPass = '';
   String proxyPing = 'غير مفحوص';
+
+  // حالة الدروع الفعلية
+  bool blockWebRtc = true;
+  bool canvasNoise = true;
+  bool syncTimezone = true;
+  bool gpsSpoof = true;
 
   DeviceProfile activeProfile = kDeviceProfiles[0];
   int noiseSeed = Random().nextInt(99999);
@@ -167,6 +174,29 @@ class _MainNavigationState extends State<MainNavigation> {
     }
   }
 
+  Future<void> _applyMockGps() async {
+    try {
+      final bool ok = await _vpnChannel.invokeMethod('setMockLocation', {
+        'lat': lat,
+        'lon': lon,
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok
+              ? 'تم تمويه الـ GPS بنجاح إلى ($lat, $lon) ✅'
+              : 'فشل التمويه: اختر V-SHIELD كتطبيق الموقع الوهمي من خيارات المطور'),
+          backgroundColor: ok ? const Color(0xFF00E676) : Colors.orangeAccent,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطأ GPS: $e'), backgroundColor: Colors.redAccent),
+      );
+    }
+  }
+
   void _rotateDeviceIdentity() {
     final rnd = Random();
     setState(() {
@@ -213,8 +243,17 @@ class _MainNavigationState extends State<MainNavigation> {
         proxyPass: proxyPass,
         proxyPing: proxyPing,
         activeProfile: activeProfile,
+        blockWebRtc: blockWebRtc,
+        canvasNoise: canvasNoise,
+        syncTimezone: syncTimezone,
+        gpsSpoof: gpsSpoof,
+        onToggleWebRtc: (v) => setState(() => blockWebRtc = v),
+        onToggleCanvas: (v) => setState(() => canvasNoise = v),
+        onToggleTimezone: (v) => setState(() => syncTimezone = v),
+        onToggleGps: (v) => setState(() => gpsSpoof = v),
         onRefresh: () => _checkIdentity(),
         onCheckProxyIp: () => _checkIdentity(targetIp: proxyHost),
+        onApplyGps: _applyMockGps,
         onUpdateProxy: _updateProxy,
         onRotateIdentity: _rotateDeviceIdentity,
       ),
@@ -222,9 +261,18 @@ class _MainNavigationState extends State<MainNavigation> {
         targetTimezone: timezone,
         profile: activeProfile,
         noiseSeed: noiseSeed,
+        blockWebRtc: blockWebRtc,
+        canvasNoise: canvasNoise,
+        syncTimezone: syncTimezone,
         onRotateIdentity: _rotateDeviceIdentity,
       ),
-      SystemSpoofTab(timezone: timezone, lat: lat, lon: lon, country: country),
+      SystemSpoofTab(
+        timezone: timezone,
+        lat: lat,
+        lon: lon,
+        country: country,
+        onApplyGps: _applyMockGps,
+      ),
     ];
 
     return Scaffold(
@@ -238,7 +286,7 @@ class _MainNavigationState extends State<MainNavigation> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.shield), label: 'الدرع والبروكسي'),
           BottomNavigationBarItem(icon: Icon(Icons.public), label: 'المتصفح الخفي'),
-          BottomNavigationBarItem(icon: Icon(Icons.terminal), label: 'النظام و ADB'),
+          BottomNavigationBarItem(icon: Icon(Icons.terminal), label: 'النظام و GPS'),
         ],
       ),
     );
@@ -250,8 +298,9 @@ class ShieldDashboard extends StatefulWidget {
   final String ip, country, city, timezone, isp;
   final String proxyType, proxyHost, proxyPort, proxyUser, proxyPass, proxyPing;
   final DeviceProfile activeProfile;
-  final bool isChecking;
-  final VoidCallback onRefresh, onCheckProxyIp, onRotateIdentity;
+  final bool isChecking, blockWebRtc, canvasNoise, syncTimezone, gpsSpoof;
+  final Function(bool) onToggleWebRtc, onToggleCanvas, onToggleTimezone, onToggleGps;
+  final VoidCallback onRefresh, onCheckProxyIp, onApplyGps, onRotateIdentity;
   final Function(String, String, String, String, String, String) onUpdateProxy;
 
   const ShieldDashboard({
@@ -269,8 +318,17 @@ class ShieldDashboard extends StatefulWidget {
     required this.proxyPass,
     required this.proxyPing,
     required this.activeProfile,
+    required this.blockWebRtc,
+    required this.canvasNoise,
+    required this.syncTimezone,
+    required this.gpsSpoof,
+    required this.onToggleWebRtc,
+    required this.onToggleCanvas,
+    required this.onToggleTimezone,
+    required this.onToggleGps,
     required this.onRefresh,
     required this.onCheckProxyIp,
+    required this.onApplyGps,
     required this.onUpdateProxy,
     required this.onRotateIdentity,
   });
@@ -284,10 +342,6 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
   bool isConnected = false;
   String selectedEngine = 'VOID VPN';
   bool fullConeNat = true;
-  bool blockWebRtc = true;
-  bool canvasNoise = true;
-  bool syncTimezone = true;
-  bool gpsSpoof = true;
 
   void _openProxyDialog() {
     String tempType = widget.proxyType;
@@ -463,7 +517,7 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
                     Text('V-SHIELD', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white)),
-                    Text('THE VOID PROTOCOL • V4.2 CORE', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF00A8FF))),
+                    Text('THE VOID PROTOCOL • V4.4 PRO', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF00A8FF))),
                   ],
                 ),
                 Row(
@@ -538,6 +592,9 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                       if (started) {
                         setState(() => isConnected = true);
                         widget.onCheckProxyIp();
+                        if (widget.gpsSpoof) {
+                          widget.onApplyGps();
+                        }
                       }
                     } else {
                       await _vpnChannel.invokeMethod('stopVpn');
@@ -586,7 +643,7 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
             ),
             const SizedBox(height: 20),
 
-            const Text('دروع تدمير البصمة وتخطي Verisoul:', style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const Text('دروع تدمير البصمة (تعمل فعلياً):', style: TextStyle(color: Colors.white70, fontSize: 13)),
             const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -594,10 +651,10 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
               child: Column(
                 children: [
                   _shieldRow('توجيه UDP بالكامل (Full Cone NAT)', fullConeNat, (v) => setState(() => fullConeNat = v)),
-                  _shieldRow('حجب تسريب WebRTC و ICE', blockWebRtc, (v) => setState(() => blockWebRtc = v)),
-                  _shieldRow('تشويش بصمة Canvas و WebGL و Audio', canvasNoise, (v) => setState(() => canvasNoise = v)),
-                  _shieldRow('مزامنة المنطقة الزمنية واللغة', syncTimezone, (v) => setState(() => syncTimezone = v)),
-                  _shieldRow('تمويه الموقع الجغرافي (GPS Spoof)', gpsSpoof, (v) => setState(() => gpsSpoof = v)),
+                  _shieldRow('حجب تسريب WebRTC و ICE', widget.blockWebRtc, widget.onToggleWebRtc),
+                  _shieldRow('تشويش بصمة Canvas و WebGL و Audio', widget.canvasNoise, widget.onToggleCanvas),
+                  _shieldRow('مزامنة المنطقة الزمنية واللغة', widget.syncTimezone, widget.onToggleTimezone),
+                  _shieldRow('تمويه GPS تلقائياً عند الاتصال', widget.gpsSpoof, widget.onToggleGps),
                 ],
               ),
             ),
@@ -661,6 +718,7 @@ class StealthBrowserTab extends StatefulWidget {
   final String targetTimezone;
   final DeviceProfile profile;
   final int noiseSeed;
+  final bool blockWebRtc, canvasNoise, syncTimezone;
   final VoidCallback onRotateIdentity;
 
   const StealthBrowserTab({
@@ -668,6 +726,9 @@ class StealthBrowserTab extends StatefulWidget {
     required this.targetTimezone,
     required this.profile,
     required this.noiseSeed,
+    required this.blockWebRtc,
+    required this.canvasNoise,
+    required this.syncTimezone,
     required this.onRotateIdentity,
   });
 
@@ -687,6 +748,7 @@ class _StealthBrowserTabState extends State<StealthBrowserTab> {
       ..setUserAgent(widget.profile.userAgent)
       ..setNavigationDelegate(
         NavigationDelegate(
+          onPageStarted: (_) => _injectVoidCloak(),
           onPageFinished: (_) => _injectVoidCloak(),
         ),
       )
@@ -696,45 +758,38 @@ class _StealthBrowserTabState extends State<StealthBrowserTab> {
   void _injectVoidCloak() {
     final p = widget.profile;
     final seed = (widget.noiseSeed % 5) + 1;
+    final webrtcJs = widget.blockWebRtc
+        ? 'window.RTCPeerConnection=undefined;window.webkitRTCPeerConnection=undefined;window.mozRTCPeerConnection=undefined;'
+        : '';
+    final tzJs = widget.syncTimezone
+        ? "const origResolved=Intl.DateTimeFormat.prototype.resolvedOptions;Intl.DateTimeFormat.prototype.resolvedOptions=function(){const res=origResolved.apply(this,arguments);res.timeZone='${widget.targetTimezone}';return res;};"
+        : '';
+    final canvasJs = widget.canvasNoise
+        ? "const origToDataURL=HTMLCanvasElement.prototype.toDataURL;HTMLCanvasElement.prototype.toDataURL=function(){const ctx=this.getContext('2d');if(ctx){ctx.fillStyle='rgba(0,0,0,0.01)';ctx.fillRect(0,0,$seed,$seed);}return origToDataURL.apply(this,arguments);};const origGetParam=WebGLRenderingContext.prototype.getParameter;WebGLRenderingContext.prototype.getParameter=function(param){if(param===37445)return '${p.gpuVendor}';if(param===37446)return '${p.gpuRenderer}';return origGetParam.apply(this,arguments);};"
+        : '';
+
     final js = '''
       (function() {
-        window.RTCPeerConnection = undefined;
-        window.webkitRTCPeerConnection = undefined;
-        window.mozRTCPeerConnection = undefined;
-
+        $webrtcJs
         Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => ${p.cores}});
         Object.defineProperty(navigator, 'deviceMemory', {get: () => ${p.memory}});
         Object.defineProperty(navigator, 'language', {get: () => 'en-US'});
         Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
         if (navigator.getBattery) navigator.getBattery = undefined;
-
-        const origResolved = Intl.DateTimeFormat.prototype.resolvedOptions;
-        Intl.DateTimeFormat.prototype.resolvedOptions = function() {
-          const res = origResolved.apply(this, arguments);
-          res.timeZone = '${widget.targetTimezone}';
-          return res;
-        };
-
-        const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
-        HTMLCanvasElement.prototype.toDataURL = function() {
-          const ctx = this.getContext('2d');
-          if (ctx) {
-            ctx.fillStyle = 'rgba(0,0,0,0.01)';
-            ctx.fillRect(0, 0, $seed, $seed);
-          }
-          return origToDataURL.apply(this, arguments);
-        };
-
-        const origGetParam = WebGLRenderingContext.prototype.getParameter;
-        WebGLRenderingContext.prototype.getParameter = function(param) {
-          if (param === 37445) return '${p.gpuVendor}';
-          if (param === 37446) return '${p.gpuRenderer}';
-          return origGetParam.apply(this, arguments);
-        };
+        $tzJs
+        $canvasJs
       })();
     ''';
     _controller.runJavaScript(js);
+  }
+
+  Future<void> _cleanSession() async {
+    await WebViewCookieManager().clearCookies();
+    await _controller.clearCache();
+    await _controller.clearLocalStorage();
+    widget.onRotateIdentity();
+    _controller.reload();
   }
 
   void _go() {
@@ -771,12 +826,9 @@ class _StealthBrowserTabState extends State<StealthBrowserTab> {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'توليد هوية جهاز جديدة',
-                  icon: const Icon(Icons.fingerprint, color: Color(0xFF00A8FF)),
-                  onPressed: () {
-                    widget.onRotateIdentity();
-                    _controller.reload();
-                  },
+                  tooltip: 'تنظيف الجلسة وتغيير الهوية',
+                  icon: const Icon(Icons.cleaning_services, color: Colors.amber),
+                  onPressed: _cleanSession,
                 ),
                 IconButton(icon: const Icon(Icons.search, color: Color(0xFF00E676)), onPressed: _go),
               ],
@@ -789,12 +841,20 @@ class _StealthBrowserTabState extends State<StealthBrowserTab> {
   }
 }
 
-// ==================== التبويب الثالث: أدوات النظام و ADB ====================
+// ==================== التبويب الثالث: أدوات النظام و GPS ====================
 class SystemSpoofTab extends StatelessWidget {
   final String timezone, country;
   final double lat, lon;
+  final VoidCallback onApplyGps;
 
-  const SystemSpoofTab({super.key, required this.timezone, required this.lat, required this.lon, required this.country});
+  const SystemSpoofTab({
+    super.key,
+    required this.timezone,
+    required this.lat,
+    required this.lon,
+    required this.country,
+    required this.onApplyGps,
+  });
 
   void _copy(BuildContext context, String cmd) {
     Clipboard.setData(ClipboardData(text: cmd));
@@ -813,10 +873,21 @@ class SystemSpoofTab extends StatelessWidget {
       child: ListView(
         padding: const EdgeInsets.all(18),
         children: [
-          const Text('أدوات تمويه النظام (بدون روت / للمحاكي و ADB)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-          const SizedBox(height: 8),
-          const Text('يتم توليد هذه الأوامر تلقائياً لتطابق دولة وإحداثيات البروكسي الحالي:', style: TextStyle(fontSize: 12, color: Colors.white54)),
+          const Text('أدوات تمويه النظام والـ GPS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00E676),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: onApplyGps,
+            icon: const Icon(Icons.my_location, color: Colors.black),
+            label: Text('تفعيل تمويه GPS فوراً ($lat, $lon)', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
           const SizedBox(height: 20),
+          const Text('أوامر ADB / Shizuku المتولدة تلقائياً:', style: TextStyle(fontSize: 12, color: Colors.white54)),
+          const SizedBox(height: 12),
           _cmdCard(context, '1. مزامنة المنطقة الزمنية ($timezone)', tzCmd),
           _cmdCard(context, '2. تمويه إحداثيات الـ GPS ($lat, $lon)', gpsCmd),
           _cmdCard(context, '3. محاكاة شريحة SIM والشبكة ($country)', simCmd),
