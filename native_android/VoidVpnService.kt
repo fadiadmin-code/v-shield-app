@@ -88,13 +88,16 @@ class VoidVpnService : VpnService() {
     }
 
     private fun stopVpn() {
-        try {
-            Tun2socks.stop()
-        } catch (_: Throwable) {}
-        try {
-            vpnInterface?.close()
-        } catch (_: Throwable) {}
+        val currentInterface = vpnInterface
         vpnInterface = null
+        Thread {
+            try {
+                Tun2socks.stop()
+            } catch (_: Throwable) {}
+            try {
+                currentInterface?.close()
+            } catch (_: Throwable) {}
+        }.start()
         try {
             stopForeground(true)
         } catch (_: Throwable) {}
