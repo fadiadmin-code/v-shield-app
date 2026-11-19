@@ -1,8 +1,13 @@
 package com.example.v_shield
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.location.Criteria
+import android.location.Location
+import android.location.LocationManager
 import android.net.VpnService
+import android.os.SystemClock
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -42,8 +47,41 @@ class MainActivity : FlutterActivity() {
                     startService(intent)
                     result.success(true)
                 }
+                "setMockLocation" -> {
+                    val lat = call.argument<Double>("lat") ?: 0.0
+                    val lon = call.argument<Double>("lon") ?: 0.0
+                    result.success(applyMockLocation(lat, lon))
+                }
                 else -> result.notImplemented()
             }
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun applyMockLocation(lat: Double, lon: Double): Boolean {
+        return try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            val provider = LocationManager.GPS_PROVIDER
+            try {
+                lm.removeTestProvider(provider)
+            } catch (_: Throwable) {}
+            lm.addTestProvider(
+                provider, false, false, false, false, true, true, true,
+                Criteria.POWER_LOW, Criteria.ACCURACY_FINE
+            )
+            lm.setTestProviderEnabled(provider, true)
+            val loc = Location(provider).apply {
+                latitude = lat
+                longitude = lon
+                altitude = 10.0
+                accuracy = 1.0f
+                time = System.currentTimeMillis()
+                elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
+            }
+            lm.setTestProviderLocation(provider, loc)
+            true
+        } catch (_: Throwable) {
+            false
         }
     }
 
