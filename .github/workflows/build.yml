@@ -51,7 +51,7 @@ jobs:
         run: |
           printf '\nandroid {\n    lint {\n        checkReleaseBuilds = false\n        abortOnError = false\n    }\n}\ndependencies {\n    implementation(files("libs/tun2socks.aar"))\n}\n' >> android/app/build.gradle.kts
           cp native_android/*.kt android/app/src/main/kotlin/com/example/v_shield/
-          python3 -c 'p="android/app/src/main/AndroidManifest.xml"; s=open(p).read(); s=s.replace("<application", "<uses-permission android:name=\"android.permission.INTERNET\"/>\n    <application android:usesCleartextTraffic=\"true\"", 1); svc="        <service android:name=\".VoidVpnService\" android:permission=\"android.permission.BIND_VPN_SERVICE\" android:exported=\"false\"><intent-filter><action android:name=\"android.net.VpnService\"/></intent-filter></service>\n    </application>"; s=s.replace("</application>", svc, 1); open(p,"w").write(s)'
+          python3 -c 'p="android/app/src/main/AndroidManifest.xml"; s=open(p).read(); s=s.replace("<application", "<uses-permission android:name=\"android.permission.INTERNET\"/>\n    <uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\"/>\n    <application android:usesCleartextTraffic=\"true\"", 1); svc="        <service android:name=\".VoidVpnService\" android:permission=\"android.permission.BIND_VPN_SERVICE\" android:exported=\"false\"><intent-filter><action android:name=\"android.net.VpnService\"/></intent-filter></service>\n    </application>"; s=s.replace("</application>", svc, 1); open(p,"w").write(s)'
 
       - name: Install Dependencies
         run: flutter pub get
