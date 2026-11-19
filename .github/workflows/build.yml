@@ -19,6 +19,11 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -28,9 +33,23 @@ jobs:
       - name: Create Android Project Files
         run: flutter create . --project-name v_shield --platforms=android
 
+      - name: Build tun2socks Core Engine
+        run: |
+          export ANDROID_NDK_HOME=$(ls -d $ANDROID_HOME/ndk/* | tail -n 1)
+          go install golang.org/x/mobile/cmd/gomobile@latest
+          go install golang.org/x/mobile/cmd/gobind@latest
+          export PATH=$PATH:$(go env GOPATH)/bin
+          gomobile init
+          cd tun2socks_core
+          go mod init tun2socks
+          go get github.com/xjasonlyu/tun2socks/v2@latest
+          go get golang.org/x/mobile/bind
+          mkdir -p ../android/app/libs
+          gomobile bind -v -target=android/arm64 -androidapi 21 -o ../android/app/libs/tun2socks.aar .
+
       - name: Inject Native VPN and Fix Lint
         run: |
-          printf '\nandroid {\n    lint {\n        checkReleaseBuilds = false\n        abortOnError = false\n    }\n}\n' >> android/app/build.gradle.kts
+          printf '\nandroid {\n    lint {\n        checkReleaseBuilds = false\n        abortOnError = false\n    }\n}\ndependencies {\n    implementation(files("libs/tun2socks.aar"))\n}\n' >> android/app/build.gradle.kts
           cp native_android/*.kt android/app/src/main/kotlin/com/example/v_shield/
           python3 -c 'p="android/app/src/main/AndroidManifest.xml"; s=open(p).read(); s=s.replace("<application", "<uses-permission android:name=\"android.permission.INTERNET\"/>\n    <application android:usesCleartextTraffic=\"true\"", 1); svc="        <service android:name=\".VoidVpnService\" android:permission=\"android.permission.BIND_VPN_SERVICE\" android:exported=\"false\"><intent-filter><action android:name=\"android.net.VpnService\"/></intent-filter></service>\n    </application>"; s=s.replace("</application>", svc, 1); open(p,"w").write(s)'
 
