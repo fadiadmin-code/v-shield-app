@@ -52,6 +52,8 @@ jobs:
           printf '\nandroid {\n    lint {\n        checkReleaseBuilds = false\n        abortOnError = false\n    }\n}\ndependencies {\n    implementation(files("libs/tun2socks.aar"))\n    implementation("dev.rikka.shizuku:api:13.1.5")\n    implementation("dev.rikka.shizuku:provider:13.1.5")\n}\n' >> android/app/build.gradle.kts
           cp native_android/*.kt android/app/src/main/kotlin/com/example/v_shield/
           python3 -c 'p="android/app/src/main/AndroidManifest.xml"; s=open(p).read(); perms="<uses-permission android:name=\"android.permission.INTERNET\"/>\n    <uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\"/>\n    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\"/>\n    <uses-permission android:name=\"android.permission.ACCESS_MOCK_LOCATION\"/>\n    <application android:usesCleartextTraffic=\"true\""; s=s.replace("<application", perms, 1); svc="        <service android:name=\".VoidVpnService\" android:permission=\"android.permission.BIND_VPN_SERVICE\" android:exported=\"false\"><intent-filter><action android:name=\"android.net.VpnService\"/></intent-filter></service>\n        <provider android:name=\"rikka.shizuku.ShizukuProvider\" android:authorities=\"${applicationId}.shizuku\" android:multiprocess=\"false\" android:enabled=\"true\" android:exported=\"true\" android:permission=\"android.permission.INTERACT_ACROSS_USERS_FULL\" />\n    </application>"; s=s.replace("</application>", svc, 1); open(p,"w").write(s)'
+
+      - name: Install Dependencies
         run: flutter pub get
 
       - name: Build APK Release
