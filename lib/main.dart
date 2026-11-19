@@ -18,7 +18,7 @@ class VShieldApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'V-SHIELD V4.4',
+      title: 'V-SHIELD V5.0',
       theme: ThemeData.dark().copyWith(
         scaffoldBackgroundColor: const Color(0xFF0B111E),
       ),
@@ -96,6 +96,7 @@ class _MainNavigationState extends State<MainNavigation> {
 
   String currentIp = 'جاري الفحص...';
   String country = '---';
+  String countryCode = 'us';
   String city = '---';
   String timezone = 'America/New_York';
   String isp = '---';
@@ -110,7 +111,6 @@ class _MainNavigationState extends State<MainNavigation> {
   String proxyPass = '';
   String proxyPing = 'غير مفحوص';
 
-  // حالة الدروع الفعلية
   bool blockWebRtc = true;
   bool canvasNoise = true;
   bool syncTimezone = true;
@@ -148,18 +148,17 @@ class _MainNavigationState extends State<MainNavigation> {
     await prefs.setString('proxyPing', ping);
   }
 
-  Future<void> _checkIdentity({String? targetIp}) async {
+  // فحص الـ Exit IP الحقيقي مباشرة عبر النفق
+  Future<void> _checkIdentity() async {
     setState(() => isChecking = true);
     try {
-      final url = (targetIp != null && targetIp.isNotEmpty)
-          ? 'http://ip-api.com/json/$targetIp'
-          : 'http://ip-api.com/json/';
-      final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
+      final res = await http.get(Uri.parse('http://ip-api.com/json/')).timeout(const Duration(seconds: 8));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
         setState(() {
           currentIp = data['query'] ?? 'غير معروف';
           country = data['country'] ?? '---';
+          countryCode = (data['countryCode'] ?? 'US').toString().toLowerCase();
           city = data['city'] ?? '---';
           timezone = data['timezone'] ?? 'UTC';
           isp = data['isp'] ?? '---';
@@ -184,7 +183,7 @@ class _MainNavigationState extends State<MainNavigation> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(ok
-              ? 'تم تمويه الـ GPS بنجاح إلى ($lat, $lon) ✅'
+              ? 'تم تمويه الـ GPS بنجاح إلى $city ($lat, $lon) ✅'
               : 'فشل التمويه: اختر V-SHIELD كتطبيق الموقع الوهمي من خيارات المطور'),
           backgroundColor: ok ? const Color(0xFF00E676) : Colors.orangeAccent,
         ),
@@ -193,6 +192,31 @@ class _MainNavigationState extends State<MainNavigation> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('خطأ GPS: $e'), backgroundColor: Colors.redAccent),
+      );
+    }
+  }
+
+  Future<void> _runShizuku(String cmd, String successMsg) async {
+    try {
+      final String res = await _vpnChannel.invokeMethod('runShizukuCmd', {'cmd': cmd});
+      if (!mounted) return;
+      String msg = successMsg;
+      Color bg = const Color(0xFF00E676);
+      if (res == 'SHIZUKU_NOT_RUNNING') {
+        msg = 'تطبيق Shizuku غير شغال! شغّله أولاً ثم أعد المحاولة.';
+        bg = Colors.orangeAccent;
+      } else if (res == 'PERMISSION_REQUESTED') {
+        msg = 'وافق على صلاحية Shizuku التي ظهرت ثم اضغط الزر مرة أخرى.';
+        bg = const Color(0xFF00A8FF);
+      } else if (res != 'OK') {
+        msg = 'نتيجة Shizuku: $res';
+        bg = Colors.redAccent;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: bg));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('خطأ Shizuku: $e'), backgroundColor: Colors.redAccent),
       );
     }
   }
@@ -221,9 +245,6 @@ class _MainNavigationState extends State<MainNavigation> {
       proxyPing = ping;
     });
     _saveProxy(type, host, port, user, pass, ping);
-    if (host.isNotEmpty) {
-      _checkIdentity(targetIp: host);
-    }
   }
 
   @override
@@ -251,8 +272,7 @@ class _MainNavigationState extends State<MainNavigation> {
         onToggleCanvas: (v) => setState(() => canvasNoise = v),
         onToggleTimezone: (v) => setState(() => syncTimezone = v),
         onToggleGps: (v) => setState(() => gpsSpoof = v),
-        onRefresh: () => _checkIdentity(),
-        onCheckProxyIp: () => _checkIdentity(targetIp: proxyHost),
+        onRefresh: _checkIdentity,
         onApplyGps: _applyMockGps,
         onUpdateProxy: _updateProxy,
         onRotateIdentity: _rotateDeviceIdentity,
@@ -271,7 +291,9 @@ class _MainNavigationState extends State<MainNavigation> {
         lat: lat,
         lon: lon,
         country: country,
+        countryCode: countryCode,
         onApplyGps: _applyMockGps,
+        onRunShizuku: _runShizuku,
       ),
     ];
 
@@ -286,7 +308,7 @@ class _MainNavigationState extends State<MainNavigation> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.shield), label: 'الدرع والبروكسي'),
           BottomNavigationBarItem(icon: Icon(Icons.public), label: 'المتصفح الخفي'),
-          BottomNavigationBarItem(icon: Icon(Icons.terminal), label: 'النظام و GPS'),
+          BottomNavigationBarItem(icon: Icon(Icons.terminal), label: 'Shizuku و GPS'),
         ],
       ),
     );
@@ -300,7 +322,8 @@ class ShieldDashboard extends StatefulWidget {
   final DeviceProfile activeProfile;
   final bool isChecking, blockWebRtc, canvasNoise, syncTimezone, gpsSpoof;
   final Function(bool) onToggleWebRtc, onToggleCanvas, onToggleTimezone, onToggleGps;
-  final VoidCallback onRefresh, onCheckProxyIp, onApplyGps, onRotateIdentity;
+  final Future<void> Function() onRefresh;
+  final VoidCallback onApplyGps, onRotateIdentity;
   final Function(String, String, String, String, String, String) onUpdateProxy;
 
   const ShieldDashboard({
@@ -327,7 +350,6 @@ class ShieldDashboard extends StatefulWidget {
     required this.onToggleTimezone,
     required this.onToggleGps,
     required this.onRefresh,
-    required this.onCheckProxyIp,
     required this.onApplyGps,
     required this.onUpdateProxy,
     required this.onRotateIdentity,
@@ -517,7 +539,7 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
                     Text('V-SHIELD', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white)),
-                    Text('THE VOID PROTOCOL • V4.4 PRO', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF00A8FF))),
+                    Text('THE VOID PROTOCOL • V5.0 SHIZUKU', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF00A8FF))),
                   ],
                 ),
                 Row(
@@ -533,7 +555,7 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                       label: Text(hasProxy ? 'تعديل البروكسي' : 'إضافة بروكسي', style: const TextStyle(color: Color(0xFF00A8FF), fontSize: 12)),
                     ),
                     IconButton(
-                      onPressed: isConnected ? widget.onCheckProxyIp : widget.onRefresh,
+                      onPressed: widget.onRefresh,
                       icon: widget.isChecking
                           ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00E676)))
                           : const Icon(Icons.refresh, color: Color(0xFF00E676)),
@@ -553,8 +575,8 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
               ),
               child: Column(
                 children: [
-                  _infoRow('عنوان الـ IP:', widget.ip, const Color(0xFF00E676)),
-                  _infoRow('الموقع والمنطقة:', '${widget.country} (${widget.timezone})', const Color(0xFF00A8FF)),
+                  _infoRow('عنوان الـ IP الحقيقي:', widget.ip, const Color(0xFF00E676)),
+                  _infoRow('المدينة والمنطقة:', '${widget.city} - ${widget.country} (${widget.timezone})', const Color(0xFF00A8FF)),
                   _infoRow('البروكسي المحفوظ:', hasProxy ? '${widget.proxyType} | ${widget.proxyHost}:${widget.proxyPort}' : 'لم يتم الإضافة بعد', hasProxy ? Colors.amber : Colors.white38),
                   _infoRow('حالة البينغ:', widget.proxyPing, Colors.white70),
                   const Divider(color: Colors.white12, height: 16),
@@ -591,7 +613,8 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                       });
                       if (started) {
                         setState(() => isConnected = true);
-                        widget.onCheckProxyIp();
+                        await Future.delayed(const Duration(seconds: 2));
+                        await widget.onRefresh();
                         if (widget.gpsSpoof) {
                           widget.onApplyGps();
                         }
@@ -599,6 +622,7 @@ class _ShieldDashboardState extends State<ShieldDashboard> {
                     } else {
                       await _vpnChannel.invokeMethod('stopVpn');
                       setState(() => isConnected = false);
+                      await Future.delayed(const Duration(seconds: 1));
                       widget.onRefresh();
                     }
                   } catch (e) {
@@ -738,7 +762,7 @@ class StealthBrowserTab extends StatefulWidget {
 
 class _StealthBrowserTabState extends State<StealthBrowserTab> {
   late final WebViewController _controller;
-  final TextEditingController _urlController = TextEditingController(text: 'https://browserleaks.com/webrtc');
+  final TextEditingController _urlController = TextEditingController(text: 'https://whoer.net');
 
   @override
   void initState() {
@@ -841,11 +865,12 @@ class _StealthBrowserTabState extends State<StealthBrowserTab> {
   }
 }
 
-// ==================== التبويب الثالث: أدوات النظام و GPS ====================
+// ==================== التبويب الثالث: Shizuku و GPS ====================
 class SystemSpoofTab extends StatelessWidget {
-  final String timezone, country;
+  final String timezone, country, countryCode;
   final double lat, lon;
   final VoidCallback onApplyGps;
+  final Future<void> Function(String cmd, String successMsg) onRunShizuku;
 
   const SystemSpoofTab({
     super.key,
@@ -853,28 +878,22 @@ class SystemSpoofTab extends StatelessWidget {
     required this.lat,
     required this.lon,
     required this.country,
+    required this.countryCode,
     required this.onApplyGps,
+    required this.onRunShizuku,
   });
-
-  void _copy(BuildContext context, String cmd) {
-    Clipboard.setData(ClipboardData(text: cmd));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تم نسخ الأمر بنجاح!'), backgroundColor: Color(0xFF00E676)),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
-    final tzCmd = 'adb shell service call alarm 3 s16 $timezone';
-    final gpsCmd = 'adb emu geo fix $lon $lat';
-    final simCmd = 'adb shell setprop gsm.sim.operator.alpha "T-Mobile" && adb shell setprop gsm.sim.operator.iso-country "us"';
+    final tzCmd = 'service call alarm 3 s16 $timezone';
+    final simCmd = 'setprop gsm.sim.operator.iso-country $countryCode && setprop gsm.operator.iso-country $countryCode';
 
     return SafeArea(
       child: ListView(
         padding: const EdgeInsets.all(18),
         children: [
-          const Text('أدوات تمويه النظام والـ GPS', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-          const SizedBox(height: 12),
+          const Text('التحكم التلقائي (GPS + Shizuku بدون روت)', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+          const SizedBox(height: 14),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF00E676),
@@ -883,47 +902,29 @@ class SystemSpoofTab extends StatelessWidget {
             ),
             onPressed: onApplyGps,
             icon: const Icon(Icons.my_location, color: Colors.black),
-            label: Text('تفعيل تمويه GPS فوراً ($lat, $lon)', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            label: Text('1. تمويه الـ GPS فوراً ($lat, $lon)', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
-          const SizedBox(height: 20),
-          const Text('أوامر ADB / Shizuku المتولدة تلقائياً:', style: TextStyle(fontSize: 12, color: Colors.white54)),
           const SizedBox(height: 12),
-          _cmdCard(context, '1. مزامنة المنطقة الزمنية ($timezone)', tzCmd),
-          _cmdCard(context, '2. تمويه إحداثيات الـ GPS ($lat, $lon)', gpsCmd),
-          _cmdCard(context, '3. محاكاة شريحة SIM والشبكة ($country)', simCmd),
-        ],
-      ),
-    );
-  }
-
-  Widget _cmdCard(BuildContext context, String title, String cmd) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF0F1624),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white10),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: const TextStyle(color: Color(0xFF00A8FF), fontWeight: FontWeight.bold, fontSize: 13)),
-          const SizedBox(height: 8),
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: const Color(0xFF070C16), borderRadius: BorderRadius.circular(8)),
-            child: Text(cmd, textDirection: TextDirection.ltr, style: const TextStyle(color: Color(0xFF00E676), fontFamily: 'monospace', fontSize: 11)),
-          ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => _copy(context, cmd),
-              icon: const Icon(Icons.copy, size: 16, color: Colors.white70),
-              label: const Text('نسخ الأمر', style: TextStyle(color: Colors.white70, fontSize: 12)),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF00A8FF),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
+            onPressed: () => onRunShizuku(tzCmd, 'تم تغيير توقيت الجهاز إلى $timezone عبر Shizuku ✅'),
+            icon: const Icon(Icons.access_time, color: Colors.black),
+            label: Text('2. مزامنة التوقيت عبر Shizuku ($timezone)', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.amber,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () => onRunShizuku(simCmd, 'تم تطبيق كود الدولة ($countryCode) للشبكة عبر Shizuku ✅'),
+            icon: const Icon(Icons.sim_card, color: Colors.black),
+            label: Text('3. تمويه كود الشبكة SIM ($countryCode)', style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
