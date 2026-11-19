@@ -4,9 +4,11 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
+import android.net.IpPrefix
 import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
+import java.net.InetAddress
 import java.net.URLEncoder
 import tun2socks.Tun2socks
 
@@ -28,7 +30,9 @@ class VoidVpnService : VpnService() {
         val user = intent?.getStringExtra("user") ?: ""
         val pass = intent?.getStringExtra("pass") ?: ""
 
-        startVpn(type, host, port, user, pass)
+        Thread {
+            startVpn(type, host, port, user, pass)
+        }.start()
         return START_STICKY
     }
 
@@ -64,9 +68,20 @@ class VoidVpnService : VpnService() {
                 .addDnsServer("1.1.1.1")
                 .setMtu(1500)
 
-            try {
-                builder.addDisallowedApplication(packageName)
-            } catch (_: Throwable) {}
+            var excludedProxyOnly = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                try {
+                    val proxyAddr = InetAddress.getByName(host)
+                    builder.excludeRoute(IpPrefix(proxyAddr, 32))
+                    excludedProxyOnly = true
+                } catch (_: Throwable) {}
+            }
+
+            if (!excludedProxyOnly) {
+                try {
+                    builder.addDisallowedApplication(packageName)
+                } catch (_: Throwable) {}
+            }
 
             vpnInterface = builder.establish()
             val fd = vpnInterface?.fd ?: return
@@ -79,11 +94,9 @@ class VoidVpnService : VpnService() {
             } else ""
             val proxyUrl = "$scheme://$auth$host:$port"
 
-            Thread {
-                try {
-                    Tun2socks.start(fd.toLong(), proxyUrl, 1500L)
-                } catch (_: Throwable) {}
-            }.start()
+            try {
+                Tun2socks.start(fd.toLong(), proxyUrl, 1500L)
+            } catch (_: Throwable) {}
         } catch (_: Throwable) {}
     }
 
