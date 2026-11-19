@@ -7,6 +7,8 @@ import android.location.Criteria
 import android.location.Location
 import android.location.LocationManager
 import android.net.VpnService
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -21,6 +23,9 @@ class MainActivity : FlutterActivity() {
     private var pendingUser = ""
     private var pendingPass = ""
     private var pendingResult: MethodChannel.Result? = null
+
+    private val gpsHandler = Handler(Looper.getMainLooper())
+    private var gpsRunnable: Runnable? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -43,6 +48,7 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "stopVpn" -> {
+                    stopMockLocationLoop()
                     val intent = Intent(this, VoidVpnService::class.java).apply { action = "STOP" }
                     startService(intent)
                     result.success(true)
@@ -50,7 +56,7 @@ class MainActivity : FlutterActivity() {
                 "setMockLocation" -> {
                     val lat = call.argument<Double>("lat") ?: 0.0
                     val lon = call.argument<Double>("lon") ?: 0.0
-                    result.success(applyMockLocation(lat, lon))
+                    result.success(startMockLocationLoop(lat, lon))
                 }
                 else -> result.notImplemented()
             }
@@ -58,17 +64,14 @@ class MainActivity : FlutterActivity() {
     }
 
     @Suppress("DEPRECATION")
-    private fun applyMockLocation(lat: Double, lon: Double): Boolean {
-        return try {
-            val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-            val provider = LocationManager.GPS_PROVIDER
+    private fun pushProviderLocation(lm: LocationManager, provider: String, lat: Double, lon: Double) {
+        try {
             try {
-                lm.removeTestProvider(provider)
+                lm.addTestProvider(
+                    provider, false, false, false, false, true, true, true,
+                    Criteria.POWER_LOW, Criteria.ACCURACY_FINE
+                )
             } catch (_: Throwable) {}
-            lm.addTestProvider(
-                provider, false, false, false, false, true, true, true,
-                Criteria.POWER_LOW, Criteria.ACCURACY_FINE
-            )
             lm.setTestProviderEnabled(provider, true)
             val loc = Location(provider).apply {
                 latitude = lat
@@ -79,10 +82,40 @@ class MainActivity : FlutterActivity() {
                 elapsedRealtimeNanos = SystemClock.elapsedRealtimeNanos()
             }
             lm.setTestProviderLocation(provider, loc)
+        } catch (_: Throwable) {}
+    }
+
+    private fun startMockLocationLoop(lat: Double, lon: Double): Boolean {
+        stopMockLocationLoop()
+        return try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            // اختبار أولي للتأكد من وجود صلاحية الموقع الوهمي
+            try {
+                lm.removeTestProvider(LocationManager.GPS_PROVIDER)
+            } catch (_: Throwable) {}
+            @Suppress("DEPRECATION")
+            lm.addTestProvider(
+                LocationManager.GPS_PROVIDER, false, false, false, false, true, true, true,
+                Criteria.POWER_LOW, Criteria.ACCURACY_FINE
+            )
+
+            gpsRunnable = object : Runnable {
+                override fun run() {
+                    pushProviderLocation(lm, LocationManager.GPS_PROVIDER, lat, lon)
+                    pushProviderLocation(lm, LocationManager.NETWORK_PROVIDER, lat, lon)
+                    gpsHandler.postDelayed(this, 1000)
+                }
+            }
+            gpsHandler.post(gpsRunnable!!)
             true
         } catch (_: Throwable) {
             false
         }
+    }
+
+    private fun stopMockLocationLoop() {
+        gpsRunnable?.let { gpsHandler.removeCallbacks(it) }
+        gpsRunnable = null
     }
 
     private fun launchVpnService() {
@@ -107,5 +140,10 @@ class MainActivity : FlutterActivity() {
             }
             pendingResult = null
         }
+    }
+
+    override fun onDestroy() {
+        stopMockLocationLoop()
+        super.onDestroy()
     }
 }
